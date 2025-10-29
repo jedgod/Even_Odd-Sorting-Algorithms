@@ -1,0 +1,67 @@
+// Even_Odd-Sorting-Algorithm_OpenMPI.cpp 
+
+// Jerry Godwin
+// Presentation
+// Even-Odd_Sorting.cpp 
+//OpenMP IMPLEMENTATION 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <omp.h>
+
+void swap(int* a, int* b) {
+    int temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void even_odd_sort(int arr[], int n) {
+    int phase, i;
+    for (phase = 0; phase < n; phase++) {
+        // Even phase
+        if (phase % 2 == 0) {
+#pragma omp parallel for
+            for (i = 0; i < n - 1; i += 2) {
+                if (arr[i] > arr[i + 1]) {
+                    swap(&arr[i], &arr[i + 1]);
+                }
+            }
+        }
+        // Odd phase
+        else {
+#pragma omp parallel for
+            for (i = 1; i < n - 1; i += 2) {
+                if (arr[i] > arr[i + 1]) {
+                    swap(&arr[i], &arr[i + 1]);
+                }
+            }
+        }
+    }
+}
+
+int main() {
+    int n = 1000; // Array size
+    int* arr = (int*)malloc(n * sizeof(int));
+
+    // Initialize array with random numbers
+    srand(42);
+    for (int i = 0; i < n; i++) {
+        arr[i] = rand() % 1000;
+    }
+
+    printf("First few elements before sorting: ");
+    for (int i = 0; i < 5; i++) printf("%d ", arr[i]);
+    printf("\n");
+
+    double start_time = omp_get_wtime();
+    even_odd_sort(arr, n);
+    double end_time = omp_get_wtime();
+
+    printf("First few elements after sorting: ");
+    for (int i = 0; i < 5; i++) printf("%d ", arr[i]);
+    printf("\n");
+    printf("Time taken: %f seconds\n", end_time - start_time);
+
+    free(arr);
+    return 0;
+}
