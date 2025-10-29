@@ -1,0 +1,165 @@
+// Jerry Godwin
+// Presentation
+// Even-Odd_Sorting.cpp 
+//CUDA IMPLEMENTATION 
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <cuda_runtime.h>
+
+// CUDA kernel for even phase
+__global__ void evenPhase(int* arr, int n) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = 2 * tid; // Map thread to even-indexed pairs
+
+    if (idx + 1 < n) {
+        if (arr[idx] > arr[idx + 1]) {
+            int temp = arr[idx];
+            arr[idx] = arr[idx + 1];
+            arr[idx + 1] = temp;
+        }
+    }
+}
+
+// CUDA kernel for odd phase
+__global__ void oddPhase(int* arr, int n) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = 2 * tid + 1; // Map thread to odd-indexed pairs
+
+    if (idx + 1 < n) {
+        if (arr[idx] > arr[idx + 1]) {
+            int temp = arr[idx];
+            arr[idx] = arr[idx + 1];
+            arr[idx + 1] = temp;
+        }
+    }
+}
+
+// CUDA kernel for even phase using shared memory
+__global__ void evenPhaseShared(int* arr, int n) {
+    extern __shared__ int shm[];
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
+    int idx = bid * blockDim.x * 2 + 2 * tid; // Each thread handles a pair
+
+    // Load data into shared memory
+    if (idx < n) shm[2 * tid] = arr[idx];
+    if (idx + 1 < n) shm[2 * tid + 1] = arr[idx + 1];
+    __syncthreads();
+
+    // Perform comparison and swap in shared memory
+    if (idx + 1 < n && 2 * tid + 1 < blockDim.x * 2) {
+        if (shm[2 * tid] > shm[2 * tid + 1]) {
+            int temp = shm[2 * tid];
+            shm[2 * tid] = shm[2 * tid + 1];
+            shm[2 * tid + 1] = temp;
+        }
+    }
+    __syncthreads();
+
+    // Write back to global memory
+    if (idx < n) arr[idx] = shm[2 * tid];
+    if (idx + 1 < n) arr[idx + 1] = shm[2 * tid + 1];
+}
+
+// CUDA kernel for odd phase using shared memory
+__global__ void oddPhaseShared(int* arr, int n) {
+    extern __shared__ int shm[];
+    int tid = threadIdx.x;
+    int bid = blockIdx.x;
+    int idx = bid * blockDim.x * 2 + 2 * tid + 1; // Each thread handles an odd pair
+
+    // Load data into shared memory
+    if (idx < n) shm[2 * tid] = arr[idx];
+    if (idx + 1 < n) shm[2 * tid + 1] = arr[idx + 1];
+    if (idx - 1 >= 0 && 2 * tid - 1 >= 0) shm[2 * tid - 1] = arr[idx - 1];
+    __syncthreads();
+
+    // Perform comparison and swap in shared memory
+    if (idx + 1 < n && 2 * tid + 1 < blockDim.x * 2) {
+        if (shm[2 * tid] > shm[2 * tid + 1]) {
+            int temp = shm[2 * tid];
+            shm[2 * tid] = shm[2 * tid + 1];
+            shm[2 * tid + 1] = temp;
+        }
+    }
+    __syncthreads();
+
+    // Write back to global memory
+    if (idx < n) arr[idx] = shm[2 * tid];
+    if (idx + 1 < n) arr[idx + 1] = shm[2 * tid + 1];
+}
+
+int main() {
+    int n = 8192; // Array size (must be even for simplicity)
+    int* h_arr, * d_arr;
+    size_t size = n * sizeof(int);
+
+    // Allocate host memory
+    h_arr = (int*)malloc(size);
+    srand(42);
+    for (int i = 0; i < n; i++) {
+        h_arr[i] = rand() % 1000;
+    }
+
+    printf("First few elements before sorting: ");
+    for (int i = 0; i < 5; i++) printf("%d ", h_arr[i]);
+    printf("\n");
+
+    // Allocate device memory
+    cudaMalloc(&d_arr, size);
+    cudaMemcpy(d_arr, h_arr, size, cudaMemcpyHostToDevice);
+
+    // Configure grid and block sizes
+    int threadsPerBlock = 256;
+    int pairsPerBlock = threadsPerBlock; // Each thread handles one pair
+    int blocks = (n / 2 + threadsPerBlock - 1) / threadsPerBlock;
+
+    // Timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+
+    // Perform even-odd sorting
+    for (int phase = 0; phase < n; phase++) {
+        if (phase % 2 == 0) {
+            evenPhaseShared << <blocks, threadsPerBlock, 2 * threadsPerBlock * sizeof(int) >> > (d_arr, n);
+        }
+        else {
+            oddPhaseShared << <blocks, threadsPerBlock, 2 * threadsPerBlock * sizeof(int) >> > (d_arr, n);
+        }
+        cudaDeviceSynchronize(); // Ensure kernel completion
+    }
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+
+    // Copy result back to host
+    cudaMemcpy(h_arr, d_arr, size, cudaMemcpyDeviceToHost);
+
+    printf("First few elements after sorting: ");
+    for (int i = 0; i < 5; i++) printf("%d ", h_arr[i]);
+    printf("\n");
+    printf("Time taken: %f milliseconds\n", milliseconds);
+
+    // Verify sorting
+    int sorted = 1;
+    for (int i = 0; i < n - 1; i++) {
+        if (h_arr[i] > h_arr[i + 1]) {
+            sorted = 0;
+            break;
+        }
+    }
+    printf("Array is %s\n", sorted ? "sorted" : "not sorted");
+
+    // Cleanup
+    cudaFree(d_arr);
+    free(h_arr);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    return 0;
+}
