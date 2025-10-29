@@ -1,0 +1,142 @@
+// Even_Odd-Sorting_MPI.cpp 
+//
+
+// Jerry Godwin
+// Presentation
+// Even-Odd_Sorting.cpp
+//MPI IMPLEMENTATION
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <mpi.h>
+
+void swap(int* a, int* b) {
+    int temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void local_even_odd_sort(int local_arr[], int local_n) {
+    for (int phase = 0; phase < local_n; phase++) {
+        if (phase % 2 == 0) {
+            for (int i = 0; i < local_n - 1; i += 2) {
+                if (local_arr[i] > local_arr[i + 1]) {
+                    swap(&local_arr[i], &local_arr[i + 1]);
+                }
+            }
+        }
+        else {
+            for (int i = 1; i < local_n - 1; i += 2) {
+                if (local_arr[i] > local_arr[i + 1]) {
+                    swap(&local_arr[i], &local_arr[i + 1]);
+                }
+            }
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    int rank, size, n = 1000; // Total array size
+    int* arr = NULL, * local_arr;
+    int local_n;
+    MPI_Status status;
+
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    // Allocate and initialize global array on rank 0
+    if (rank == 0) {
+        arr = (int*)malloc(n * sizeof(int));
+        srand(42);
+        for (int i = 0; i < n; i++) {
+            arr[i] = rand() % 1000;
+        }
+        printf("First few elements before sorting: ");
+        for (int i = 0; i < 5; i++) printf("%d ", arr[i]);
+        printf("\n");
+    }
+
+    // Calculate local array size
+    local_n = n / size;
+    local_arr = (int*)malloc(local_n * sizeof(int));
+
+    // Scatter the array to all processes
+    MPI_Scatter(arr, local_n, MPI_INT, local_arr, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    double start_time = MPI_Wtime();
+
+    // Perform local even-odd sort
+    local_even_odd_sort(local_arr, local_n);
+
+    // Perform global even-odd exchange
+    for (int phase = 0; phase < size; phase++) {
+        if (phase % 2 == 0) {
+            if (rank % 2 == 0 && rank < size - 1) {
+                // Send last element to next process
+                MPI_Send(&local_arr[local_n - 1], 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+                // Receive first element from next process
+                int neighbor;
+                MPI_Recv(&neighbor, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                if (local_arr[local_n - 1] > neighbor) {
+                    swap(&local_arr[local_n - 1], &neighbor);
+                }
+                // Send back updated neighbor
+                MPI_Send(&neighbor, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+            }
+            else if (rank % 2 == 1) {
+                // Receive last element from previous process
+                int neighbor;
+                MPI_Recv(&neighbor, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                if (neighbor > local_arr[0]) {
+                    swap(&neighbor, &local_arr[0]);
+                }
+                // Send back updated first element
+                MPI_Send(&local_arr[0], 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
+            }
+        }
+        else {
+            if (rank % 2 == 1 && rank < size - 1) {
+                // Send last element to next process
+                MPI_Send(&local_arr[local_n - 1], 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+                int neighbor;
+                MPI_Recv(&neighbor, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                if (local_arr[local_n - 1] > neighbor) {
+                    swap(&local_arr[local_n - 1], &neighbor);
+                }
+                MPI_Send(&neighbor, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+            }
+            else if (rank % 2 == 0 && rank > 0) {
+                int neighbor;
+                MPI_Recv(&neighbor, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                if (neighbor > local_arr[0]) {
+                    swap(&neighbor, &local_arr[0]);
+                }
+                MPI_Send(&local_arr[0], 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
+            }
+        }
+        // Re-sort locally after exchange
+        local_even_odd_sort(local_arr, local_n);
+    }
+
+    // Gather sorted subarrays back to rank 0
+    if (rank == 0) {
+        arr = (int*)malloc(n * sizeof(int));
+    }
+    MPI_Gather(local_arr, local_n, MPI_INT, arr, local_n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    double end_time = MPI_Wtime();
+
+    if (rank == 0) {
+        printf("First few elements after sorting: ");
+        for (int i = 0; i < 5; i++) printf("%d ", arr[i]);
+        printf("\n");
+        printf("Time taken: %f seconds\n", end_time - start_time);
+        free(arr);
+    }
+
+    free(local_arr);
+    MPI_Finalize();
+    return 0;
+}
